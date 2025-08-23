@@ -25,6 +25,7 @@ import {
 } from '@mui/icons-material'
 import { createWorker } from 'tesseract.js'
 import { UploadedImage } from '@/types'
+import { validateFileUpload, validateInput, logSecurityEvent } from '@/lib/security'
 
 interface ImageUploaderProps {
   onImageUpload: (image: UploadedImage) => void
@@ -102,19 +103,29 @@ export function ImageUploader({ onImageUpload }: ImageUploaderProps) {
     setOcrProgress(0)
     setOcrStatus('')
 
-    // Validate file type
-    if (!file.type.startsWith('image/')) {
-      setError('Please upload an image file')
+    // Use security validation
+    const validation = validateFileUpload(file)
+    if (!validation.valid) {
+      setError(validation.error || 'Invalid file')
       setLoading(false)
+
+      // Log security event
+      logSecurityEvent({
+        type: 'file_upload',
+        userAgent: navigator.userAgent,
+        details: {
+          filename: file.name,
+          size: file.size,
+          type: file.type,
+          error: validation.error
+        }
+      })
+
       return
     }
 
-    // Validate file size (max 10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      setError('File size must be less than 10MB')
-      setLoading(false)
-      return
-    }
+    // Sanitize the filename
+    const sanitizedFilename = validateInput.filename(file.name)
 
         try {
       // Create preview URL
@@ -150,21 +161,23 @@ export function ImageUploader({ onImageUpload }: ImageUploaderProps) {
     }
   }
 
-  // OCR function using Tesseract.js
-  const extractTextFromImage = async (file: File): Promise<string> => {
-    setOcrStatus('Initializing OCR engine...')
+  // OCR function using Tesseract.js with retry logic
+  const extractTextFromImage = async (file: File, retryCount = 0): Promise<string> => {
+    const maxRetries = 2
+
+    setOcrStatus(`Initializing OCR engine...${retryCount > 0 ? ` (Attempt ${retryCount + 1})` : ''}`)
     setOcrProgress(10)
 
     let worker
     try {
       worker = await createWorker('eng')
-      
+
       setOcrStatus('Language model loaded')
       setOcrProgress(30)
-      
+
       setOcrStatus('Analyzing image...')
       setOcrProgress(50)
-      
+
       // Simulate progress updates during recognition
       const progressInterval = setInterval(() => {
         setOcrProgress(prev => {
@@ -174,26 +187,59 @@ export function ImageUploader({ onImageUpload }: ImageUploaderProps) {
           return prev
         })
       }, 200)
-      
+
       const { data: { text } } = await worker.recognize(file)
-      
+
       clearInterval(progressInterval)
       setOcrProgress(100)
       setOcrStatus('Text extraction complete!')
-      
+
       await worker.terminate()
-      
+
       if (!text.trim()) {
         throw new Error('No text detected in image. Please ensure the image contains clear, readable text.')
       }
-      
+
       return text.trim()
     } catch (err) {
       if (worker) {
         await worker.terminate()
       }
+
       console.error('OCR Error:', err)
-      throw new Error('Failed to extract text from image. Please try with a clearer image.')
+
+      // Retry logic for temporary failures
+      if (retryCount < maxRetries && (
+        err instanceof Error && (
+          err.message.includes('network') ||
+          err.message.includes('importScripts') ||
+          err.message.includes('worker') ||
+          err.message.includes('Failed to execute')
+        )
+      )) {
+        console.log(`OCR failed, retrying... (attempt ${retryCount + 1}/${maxRetries + 1})`)
+        await new Promise(resolve => setTimeout(resolve, 1000)) // Wait 1 second before retry
+        return extractTextFromImage(file, retryCount + 1)
+      }
+
+      // Provide more specific error messages
+      let errorMessage = 'Failed to extract text from image.'
+
+      if (err instanceof Error) {
+        if (err.message.includes('worker') || err.message.includes('Content Security Policy')) {
+          errorMessage = 'OCR worker failed to initialize due to security restrictions. You can still enter text manually or try refreshing the page.'
+        } else if (err.message.includes('network') || err.message.includes('importScripts') || err.message.includes('data:')) {
+          errorMessage = 'OCR worker could not load required files due to security restrictions. You can still enter text manually.'
+        } else if (err.message.includes('timeout')) {
+          errorMessage = 'OCR processing timed out. Please try with a smaller image or enter text manually.'
+        } else if (err.message.includes('Failed to execute')) {
+          errorMessage = 'OCR service is currently unavailable. Please try again later or enter text manually.'
+        } else {
+          errorMessage = err.message
+        }
+      }
+
+      throw new Error(errorMessage)
     }
   }
 
@@ -264,6 +310,23 @@ export function ImageUploader({ onImageUpload }: ImageUploaderProps) {
             <Typography variant="caption" display="block" color="text.secondary">
               Supported formats: PNG, JPG, JPEG (max 10MB)
             </Typography>
+            <Divider sx={{ my: 2 }} />
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => {
+                const manualText = prompt('Enter your text manually:', '')
+                if (manualText && manualText.trim()) {
+                  setExtractedText(manualText.trim())
+                  setShowTextPreview(true)
+                  setSnackbarMessage('✅ Text entered manually!')
+                  setSnackbarOpen(true)
+                }
+              }}
+              sx={{ mt: 1 }}
+            >
+              ✏️ Or Enter Text Manually
+            </Button>
           </Box>
         )}
       </Paper>
@@ -375,6 +438,27 @@ export function ImageUploader({ onImageUpload }: ImageUploaderProps) {
               variant="text"
               size="large"
               onClick={() => {
+                const manualText = prompt('Enter your text manually:', extractedText || '')
+                if (manualText && manualText.trim()) {
+                  setExtractedText(manualText.trim())
+                  setSnackbarMessage('✅ Text updated manually!')
+                  setSnackbarOpen(true)
+                }
+              }}
+              sx={{
+                flex: isMobile ? 1 : '0 1 auto',
+                minHeight: isMobile ? '48px' : 'auto',
+                fontSize: isMobile ? '0.875rem' : '0.875rem',
+                color: 'text.secondary',
+              }}
+            >
+              ✏️ Edit Text
+            </Button>
+
+            <Button
+              variant="text"
+              size="large"
+              onClick={() => {
                 // Reset all state to allow uploading another image
                 setExtractedText('')
                 setShowTextPreview(false)
@@ -405,8 +489,37 @@ export function ImageUploader({ onImageUpload }: ImageUploaderProps) {
       />
 
       {error && (
-        <Alert severity="error" sx={{ mt: 2 }}>
+        <Alert
+          severity="error"
+          sx={{ mt: 2 }}
+          action={
+            error.includes('OCR') || error.includes('security') ? (
+              <Button
+                color="inherit"
+                size="small"
+                onClick={() => {
+                  setError(null)
+                  // Allow manual text entry even without image
+                  const manualText = prompt('Enter your text manually:', '')
+                  if (manualText && manualText.trim()) {
+                    setExtractedText(manualText.trim())
+                    setShowTextPreview(true)
+                    setSnackbarMessage('✅ Text entered manually!')
+                    setSnackbarOpen(true)
+                  }
+                }}
+              >
+                Enter Text Manually
+              </Button>
+            ) : null
+          }
+        >
           {error}
+          {(error.includes('OCR') || error.includes('security')) && (
+            <Box sx={{ mt: 1, fontSize: '0.875rem' }}>
+              💡 <strong>Alternative:</strong> You can enter text manually or try with a different image.
+            </Box>
+          )}
         </Alert>
       )}
 

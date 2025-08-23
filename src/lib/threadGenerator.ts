@@ -14,13 +14,7 @@ const getOpenAIClient = () => {
                  process.env.NEXT_PUBLIC_OPENAI_API_KEY ||
                  'demo-key'
 
-  console.log('🔑 OpenAI client initialization:', {
-    hasLocalStorageKey: !!localStorage.getItem('openai_api_key'),
-    hasEnvKey: !!process.env.NEXT_PUBLIC_OPENAI_API_KEY,
-    usingKey: apiKey === 'demo-key' ? 'demo-key' : 'real-key',
-    keyPrefix: apiKey === 'demo-key' ? 'demo' : apiKey.substring(0, 10) + '...',
-    isValidFormat: apiKey.startsWith('sk-') && apiKey.length > 20
-  })
+  // Initialize OpenAI client with API key
 
   if (apiKey === 'demo-key') {
     throw new Error('No valid OpenAI API key found. Please configure your API key first.')
@@ -40,25 +34,17 @@ export async function generateThreadFromText({ extractedText, style = 'education
   const apiKey = localStorage.getItem('openai_api_key') || process.env.NEXT_PUBLIC_OPENAI_API_KEY || 'demo-key'
   const hasValidAPIKey = useAI && apiKey && apiKey !== 'demo-key' && apiKey.startsWith('sk-')
 
-  console.log('Thread generation decision:', {
-    useAI,
-    apiKey: apiKey === 'demo-key' ? 'demo-key' : apiKey.substring(0, 10) + '...',
-    hasValidAPIKey,
-    willUseAI: hasValidAPIKey
-  })
+  // Determine if AI should be used for thread generation
 
   if (hasValidAPIKey) {
     try {
-      console.log('🚀 Starting AI-powered thread generation...')
       const result = await generateAIThread(cleanText, style)
-      console.log('✅ AI thread generation completed successfully')
       return result
     } catch (error) {
-      console.error('❌ AI generation failed:', error)
-      console.log('🔄 Falling back to rule-based generation')
+      console.error('AI generation failed, falling back to rule-based generation:', error)
     }
   } else {
-    console.log('📝 Using rule-based generation (no valid API key)')
+    // Using rule-based generation (no valid API key)
   }
   
   // Rule-based generation (fallback or when AI is disabled)
@@ -74,8 +60,6 @@ export async function generateThreadFromText({ extractedText, style = 'education
 }
 
 async function generateAIThread(extractedText: string, style: string): Promise<GeneratedThread> {
-  console.log('🔄 Generating AI thread with style:', style)
-  console.log('📝 Input text length:', extractedText.length, 'characters')
 
   const openai = getOpenAIClient()
 
@@ -106,6 +90,8 @@ TECHNICAL FOCUS AREAS:
 - Security implications and best practices
 - Real-world production challenges and solutions
 
+IMPORTANT: Return ONLY a raw JSON object without any markdown formatting, code blocks, or additional text. The response must be valid JSON that can be parsed directly.
+
 Return a JSON object with this exact structure:
 {
   "title": "Engaging thread title with emoji",
@@ -121,14 +107,14 @@ Return a JSON object with this exact structure:
       "order": 2,
       "content": "Technical content tweet under 275 chars"
     }
-    // ... more tweets
   ]
 }
 
-Focus on making this thread shareable, educational, and technically accurate. Include specific metrics, technologies, and actionable insights that developers can immediately apply.`
+Focus on making this thread shareable, educational, and technically accurate. Include specific metrics, technologies, and actionable insights that developers can immediately apply.
+
+Remember: Return ONLY the JSON object, no markdown formatting, no code blocks, no additional text.`
 
   try {
-    console.log('📡 Calling OpenAI API...')
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
@@ -147,22 +133,40 @@ Focus on making this thread shareable, educational, and technically accurate. In
       frequency_penalty: 0.1 // Reduce repetition
     })
 
-    console.log('📥 Received OpenAI response')
-
     const content = response.choices[0]?.message?.content
     if (!content) {
       throw new Error('No content generated from OpenAI')
     }
 
-    console.log('🔍 Parsing AI response...')
-    const threadData = JSON.parse(content)
+    // Extract JSON from markdown response if needed
+    let jsonContent = content
+    if (content.includes('```json')) {
+      const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/)
+      if (jsonMatch) {
+        jsonContent = jsonMatch[1]
+      }
+    } else if (content.includes('```')) {
+      // Handle case where it's just code blocks without json specifier
+      const codeMatch = content.match(/```\s*([\s\S]*?)\s*```/)
+      if (codeMatch) {
+        jsonContent = codeMatch[1]
+      }
+    }
+
+    let threadData
+    try {
+      threadData = JSON.parse(jsonContent)
+    } catch (parseError) {
+      console.error('JSON parsing error:', parseError)
+      console.error('Raw content:', content)
+      console.error('Extracted JSON content:', jsonContent)
+      throw new Error(`Failed to parse AI response as JSON. The AI may have returned an invalid format.`)
+    }
 
     // Validate and ensure proper structure
     if (!threadData.tweets || !Array.isArray(threadData.tweets)) {
-      throw new Error('Invalid thread structure from AI')
+      throw new Error('Invalid thread structure from AI - missing tweets array')
     }
-
-    console.log(`✅ Generated ${threadData.tweets.length} tweets`)
 
     // Ensure character limits are respected and add variety
     threadData.tweets = threadData.tweets.map((tweet: any, index: number) => {
@@ -189,11 +193,10 @@ Focus on making this thread shareable, educational, and technically accurate. In
       tweets: threadData.tweets
     }
 
-    console.log('🎉 AI thread generation completed:', result.title)
     return result
 
   } catch (error) {
-    console.error('❌ OpenAI API error:', error)
+    console.error('OpenAI API error:', error)
     throw error
   }
 }

@@ -35,31 +35,21 @@ export function AIConfig({ onConfigChange }: AIConfigProps) {
     const localKey = localStorage.getItem('openai_api_key')
     const sessionKey = sessionStorage.getItem('openai_api_key')
 
-    console.log('🔍 Checking for existing API key:', {
-      envKey: envKey ? 'present' : 'not found',
-      localKey: localKey ? 'present' : 'not found',
-      sessionKey: sessionKey ? 'present' : 'not found'
-    })
-
     if (envKey && envKey !== 'demo-key' && envKey.startsWith('sk-')) {
-      console.log('✅ Found valid API key in environment')
       setKeyStatus('valid')
       onConfigChange?.(true)
     } else if (localKey && localKey.startsWith('sk-')) {
-      console.log('✅ Found valid API key in localStorage')
       setApiKey(localKey)
       setKeyStatus('valid')
       onConfigChange?.(true)
     } else if (sessionKey && sessionKey.startsWith('sk-')) {
-      console.log('✅ Found valid API key in sessionStorage')
       setApiKey(sessionKey)
       setKeyStatus('valid')
       onConfigChange?.(true)
     } else {
-      console.log('❌ No valid API key found')
       setIsExpanded(true) // Auto-expand if no key is set
     }
-  }, [onConfigChange])
+  }, []) // Remove onConfigChange from dependency array to prevent infinite loops
 
   const handleSaveKey = () => {
     const trimmedKey = apiKey.trim()
@@ -71,26 +61,17 @@ export function AIConfig({ onConfigChange }: AIConfigProps) {
       // Also try to set in session storage as backup
       sessionStorage.setItem('openai_api_key', trimmedKey)
 
-      // Set it in process.env for immediate use (though this may not persist)
-      process.env.NEXT_PUBLIC_OPENAI_API_KEY = trimmedKey
+      // Note: process.env cannot be modified at runtime in Next.js
+      // The API key will be available via localStorage for the session
 
       setKeyStatus('valid')
       setIsExpanded(false)
       onConfigChange?.(true)
 
-      console.log('✅ API key configured successfully:', {
-        keyLength: trimmedKey.length,
-        keyPrefix: trimmedKey.substring(0, 10) + '...',
-        storedInLocalStorage: !!localStorage.getItem('openai_api_key'),
-        storedInSessionStorage: !!sessionStorage.getItem('openai_api_key')
-      })
+      // API key configured successfully
     } else {
       setKeyStatus('invalid')
-      console.log('❌ Invalid API key format:', {
-        startsWithSk: trimmedKey.startsWith('sk-'),
-        length: trimmedKey.length,
-        minLengthRequired: 20
-      })
+      // Invalid API key format
     }
   }
 
@@ -99,17 +80,15 @@ export function AIConfig({ onConfigChange }: AIConfigProps) {
     localStorage.removeItem('openai_api_key')
     sessionStorage.removeItem('openai_api_key')
 
-    // Clear from process.env if it was set
-    if (process.env.NEXT_PUBLIC_OPENAI_API_KEY) {
-      process.env.NEXT_PUBLIC_OPENAI_API_KEY = ''
-    }
+    // Note: process.env cannot be modified at runtime in Next.js
+    // The API key will be cleared from localStorage and sessionStorage
 
     setApiKey('')
     setKeyStatus('none')
     setIsExpanded(true)
     onConfigChange?.(false)
 
-    console.log('🗑️ API key cleared from all storage locations')
+    // API key cleared from all storage locations
   }
 
   return (

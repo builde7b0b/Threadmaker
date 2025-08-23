@@ -23,8 +23,10 @@ import {
   Favorite as HeartIcon,
   Repeat as RetweetIcon,
   Reply as ReplyIcon,
+  Send as SendIcon,
 } from '@mui/icons-material'
 import { GeneratedThread } from '@/types'
+import { postThreadToTwitter } from '@/lib/twitter'
 
 interface ThreadPreviewProps {
   thread: GeneratedThread
@@ -34,6 +36,8 @@ interface ThreadPreviewProps {
 export function ThreadPreview({ thread, onReset }: ThreadPreviewProps) {
   const [copiedTweet, setCopiedTweet] = useState<string | null>(null)
   const [snackbarOpen, setSnackbarOpen] = useState(false)
+  const [twitterPosting, setTwitterPosting] = useState(false)
+  const [twitterError, setTwitterError] = useState<string | null>(null)
 
   const copyTweet = async (content: string, tweetId: string) => {
     try {
@@ -63,7 +67,7 @@ export function ThreadPreview({ thread, onReset }: ThreadPreviewProps) {
     const fullThread = thread.tweets
       .map((tweet, index) => `Tweet ${index + 1}/${thread.totalTweets}\n\n${tweet.content}`)
       .join('\n\n' + '='.repeat(50) + '\n\n')
-    
+
     const blob = new Blob([fullThread], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -73,6 +77,39 @@ export function ThreadPreview({ thread, onReset }: ThreadPreviewProps) {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
+  }
+
+  const postToTwitter = async () => {
+    const accessToken = localStorage.getItem('twitter_access_token')
+    const refreshToken = localStorage.getItem('twitter_refresh_token')
+
+    if (!accessToken) {
+      setTwitterError('Please connect your Twitter account first.')
+      setSnackbarOpen(true)
+      return
+    }
+
+    setTwitterPosting(true)
+    setTwitterError(null)
+
+    try {
+      const result = await postThreadToTwitter(thread, accessToken, refreshToken)
+
+      if (result.success) {
+        setCopiedTweet('twitter')
+        setSnackbarOpen(true)
+        console.log('✅ Thread posted to Twitter:', result.tweetIds)
+      } else {
+        setTwitterError(result.error || 'Failed to post to Twitter')
+        setSnackbarOpen(true)
+      }
+    } catch (error) {
+      console.error('Twitter posting error:', error)
+      setTwitterError('Failed to post to Twitter. Please try again.')
+      setSnackbarOpen(true)
+    } finally {
+      setTwitterPosting(false)
+    }
   }
 
   return (
@@ -88,11 +125,12 @@ export function ThreadPreview({ thread, onReset }: ThreadPreviewProps) {
             variant="outlined" 
           />
         </Box>
-        <Box display="flex" gap={1}>
+        <Box display="flex" gap={1} flexWrap="wrap">
           <Button
             variant="outlined"
             onClick={onReset}
             startIcon={<RefreshIcon />}
+            size="small"
           >
             New Thread
           </Button>
@@ -100,6 +138,7 @@ export function ThreadPreview({ thread, onReset }: ThreadPreviewProps) {
             variant="contained"
             onClick={copyFullThread}
             startIcon={<CopyIcon />}
+            size="small"
           >
             Copy All
           </Button>
@@ -108,8 +147,27 @@ export function ThreadPreview({ thread, onReset }: ThreadPreviewProps) {
             onClick={downloadThread}
             startIcon={<DownloadIcon />}
             color="secondary"
+            size="small"
           >
             Download
+          </Button>
+          <Button
+            variant="contained"
+            onClick={postToTwitter}
+            startIcon={<SendIcon />}
+            disabled={twitterPosting || !localStorage.getItem('twitter_access_token')}
+            sx={{
+              backgroundColor: '#1DA1F2',
+              '&:hover': {
+                backgroundColor: '#0d95e8',
+              },
+              '&.Mui-disabled': {
+                backgroundColor: '#ccc',
+              }
+            }}
+            size="small"
+          >
+            {twitterPosting ? 'Posting...' : 'Post to Twitter'}
           </Button>
         </Box>
       </Box>
@@ -228,11 +286,21 @@ export function ThreadPreview({ thread, onReset }: ThreadPreviewProps) {
 
       <Snackbar
         open={snackbarOpen}
-        autoHideDuration={3000}
+        autoHideDuration={5000}
         onClose={() => setSnackbarOpen(false)}
       >
-        <Alert severity="success" onClose={() => setSnackbarOpen(false)}>
-          {copiedTweet === 'full' ? 'Full thread copied!' : 'Tweet copied to clipboard!'}
+        <Alert
+          severity={twitterError ? 'error' : 'success'}
+          onClose={() => setSnackbarOpen(false)}
+        >
+          {twitterError
+            ? twitterError
+            : copiedTweet === 'twitter'
+            ? '🎉 Thread posted to Twitter successfully!'
+            : copiedTweet === 'full'
+            ? 'Full thread copied!'
+            : 'Tweet copied to clipboard!'
+          }
         </Alert>
       </Snackbar>
     </Box>

@@ -21,27 +21,52 @@ import {
 } from '@mui/icons-material'
 import { UploadedImage, GeneratedThread } from '@/types'
 import { generateThreadFromText } from '@/lib/threadGenerator'
+import { canUserGenerateThread, incrementThreadUsage } from '@/lib/supabase'
+import { User } from '@supabase/supabase-js'
 
 interface ThreadGeneratorProps {
   image: UploadedImage
   onThreadGenerated: (thread: GeneratedThread) => void
+  currentUser?: User | null
 }
 
-export function ThreadGenerator({ image, onThreadGenerated }: ThreadGeneratorProps) {
+export function ThreadGenerator({ image, onThreadGenerated, currentUser }: ThreadGeneratorProps) {
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [paymentWallActive, setPaymentWallActive] = useState(false)
 
   // Debug logging
   console.log('ThreadGenerator render:', {
     hasImage: !!image,
     hasContent: !!image?.content,
     contentLength: image?.content?.length,
-    generating
+    generating,
+    currentUser: currentUser?.email,
+    paymentWallActive
   })
 
   const generateThread = async () => {
+    // Check payment wall first
+    if (currentUser) {
+      try {
+        const canGenerate = await canUserGenerateThread(currentUser.id)
+        if (!canGenerate) {
+          setPaymentWallActive(true)
+          setError('You\'ve reached your free tier limit. Upgrade to premium for unlimited thread generation!')
+          setGenerating(false)
+          return
+        }
+      } catch (error) {
+        console.error('Error checking subscription:', error)
+        setError('Unable to verify subscription status. Please try again.')
+        setGenerating(false)
+        return
+      }
+    }
+
     setGenerating(true)
     setError(null)
+    setPaymentWallActive(false)
 
     try {
       if (!image.content) {
@@ -56,6 +81,17 @@ export function ThreadGenerator({ image, onThreadGenerated }: ThreadGeneratorPro
         style: 'viral', // Default to viral style for maximum engagement
         useAI: true // Enable AI-powered generation
       })
+
+      // Increment usage for authenticated users
+      if (currentUser) {
+        try {
+          await incrementThreadUsage(currentUser.id)
+          console.log('📊 Usage incremented for user:', currentUser.id)
+        } catch (usageError) {
+          console.warn('Failed to increment usage:', usageError)
+          // Don't fail the thread generation for usage tracking errors
+        }
+      }
 
       console.log('✅ Thread generation completed:', thread.title)
       onThreadGenerated(thread)
@@ -190,14 +226,43 @@ export function ThreadGenerator({ image, onThreadGenerated }: ThreadGeneratorPro
                 </Box>
               )}
 
-              <Box mt={3}>
-                <Typography variant="caption" display="block" color="text.secondary">
-                  ✨ Features included:
-                </Typography>
-                <Typography variant="caption" display="block" color="text.secondary">
-                  • Viral hook optimization • Engagement boosters • Proper thread formatting
-                </Typography>
-              </Box>
+                    {/* Payment Wall */}
+      {paymentWallActive && (
+        <Alert
+          severity="warning"
+          sx={{ mt: 2 }}
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+            >
+              Upgrade Now
+            </Button>
+          }
+        >
+          <Typography variant="body2">
+            <strong>Free Tier Limit Reached!</strong>
+          </Typography>
+          <Typography variant="body2">
+            You've used all 5 free threads this month. Upgrade to Premium for unlimited thread generation and Twitter integration!
+          </Typography>
+        </Alert>
+      )}
+
+      <Box mt={3}>
+        <Typography variant="caption" display="block" color="text.secondary">
+          ✨ Features included:
+        </Typography>
+        <Typography variant="caption" display="block" color="text.secondary">
+          • Viral hook optimization • Engagement boosters • Proper thread formatting
+        </Typography>
+        {!currentUser && (
+          <Typography variant="caption" display="block" color="primary.main" sx={{ mt: 1 }}>
+            💡 Sign up for an account to unlock premium features and track your usage!
+          </Typography>
+        )}
+      </Box>
             </Box>
           </Paper>
         </Box>

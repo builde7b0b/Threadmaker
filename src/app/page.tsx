@@ -16,7 +16,12 @@ import { ImageUploader } from '@/components/ImageUploader'
 import { ThreadGenerator } from '@/components/ThreadGenerator'
 import { ThreadPreview } from '@/components/ThreadPreview'
 import { AIConfig } from '@/components/AIConfig'
+import { TwitterAuth } from '@/components/TwitterAuth'
+import { Auth } from '@/components/Auth'
+import { Subscription } from '@/components/Subscription'
+import { DevTools } from '@/components/DevTools'
 import { UploadedImage, GeneratedThread } from '@/types'
+import { User } from '@supabase/supabase-js'
 
 const steps = ['Upload Screenshot', 'Generate Thread', 'Preview & Export']
 
@@ -25,16 +30,12 @@ export default function Home() {
   const [uploadedImage, setUploadedImage] = useState<UploadedImage | null>(null)
   const [generatedThread, setGeneratedThread] = useState<GeneratedThread | null>(null)
   const [hasValidAIConfig, setHasValidAIConfig] = useState(false)
+  const [currentUser, setCurrentUser] = useState<User | null>(null)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('md'))
 
-  // Debug logging
-  console.log('Main page render:', {
-    activeStep,
-    hasUploadedImage: !!uploadedImage,
-    hasGeneratedThread: !!generatedThread,
-    hasValidAIConfig
-  })
+  // Debug logging removed to prevent infinite re-renders
 
   const handleImageUpload = (image: UploadedImage) => {
     setUploadedImage(image)
@@ -54,7 +55,22 @@ export default function Home() {
 
   const handleConfigChange = (hasValidKey: boolean) => {
     setHasValidAIConfig(hasValidKey)
-    console.log('AI config changed:', hasValidKey)
+  }
+
+  const handleAuthSuccess = (user: User) => {
+    setCurrentUser(user)
+    setIsAuthenticated(true)
+    console.log('User authenticated:', user.email)
+  }
+
+  const handleAuthError = (error: string) => {
+    console.error('Authentication error:', error)
+  }
+
+  const handleSignOut = () => {
+    setCurrentUser(null)
+    setIsAuthenticated(false)
+    console.log('User signed out')
   }
 
   return (
@@ -86,7 +102,22 @@ export default function Home() {
         </Paper>
       </Box>
 
+      <Auth
+        onAuthSuccess={handleAuthSuccess}
+        onAuthError={handleAuthError}
+        onSignOut={handleSignOut}
+      />
+
+      {isAuthenticated && currentUser && (
+        <>
+          <DevTools user={currentUser} />
+          <Subscription user={currentUser} />
+        </>
+      )}
+
       <AIConfig onConfigChange={handleConfigChange} />
+
+      <TwitterAuth />
 
       <Box sx={{ minHeight: '400px' }}>
         {activeStep === 0 && (
@@ -98,6 +129,7 @@ export default function Home() {
             key={uploadedImage.file.name + uploadedImage.file.size}
             image={uploadedImage}
             onThreadGenerated={handleThreadGenerated}
+            currentUser={currentUser}
           />
         )}
         

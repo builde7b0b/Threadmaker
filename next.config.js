@@ -1,13 +1,77 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Security headers
+  async headers() {
+    return [
+      {
+        // Apply these headers to all routes
+        source: '/(.*)',
+        headers: [
+          {
+            key: 'X-Frame-Options',
+            value: 'DENY',
+          },
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff',
+          },
+          {
+            key: 'X-XSS-Protection',
+            value: '1; mode=block',
+          },
+          {
+            key: 'Referrer-Policy',
+            value: 'strict-origin-when-cross-origin',
+          },
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=()',
+          },
+          {
+            key: 'Content-Security-Policy',
+            value: `
+              default-src 'self';
+              script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://twitter.com https://cdn.jsdelivr.net blob:;
+              style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+              font-src 'self' https://fonts.gstatic.com;
+              img-src 'self' data: blob: https:;
+              connect-src 'self' data: https://api.stripe.com https://api.twitter.com https://*.supabase.co https://api.openai.com;
+              frame-src 'self' https://js.stripe.com https://twitter.com;
+              worker-src 'self' blob:;
+              object-src 'none';
+              base-uri 'self';
+              form-action 'self';
+            `.replace(/\s+/g, ' ').trim(),
+          },
+        ],
+      },
+    ]
+  },
+
+  // Disable X-Powered-By header for security
+  poweredByHeader: false,
+
   images: {
     domains: ['localhost'],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '**',
+      },
+    ],
   },
+
   webpack: (config) => {
     config.resolve.alias = {
       ...config.resolve.alias,
       "tesseract.js-core": "tesseract.js-core/tesseract-core.wasm.js"
     }
+
+    // Remove source maps in production for security
+    if (process.env.NODE_ENV === 'production') {
+      config.devtool = false
+    }
+
     return config
   }
 }
